@@ -407,6 +407,20 @@ The unconditional deletion admission:
 1. checks if a "delete" request contains the `IgnoreStoreReadErrorWithClusterBreakingPotential` option
 2. if it does, it checks the RBAC of the request's user for the `delete-ignore-read-errors` verb of the given resource
 
+#### Error Propagation and Client Recovery
+
+**Server-side flow when deleting a corrupt object:**
+
+1. **Storage Layer** ([`etcd3/store.go`](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/storage/etcd3/store.go)): When `AllowUnsafeMalformedObjectDeletion` is enabled and `IgnoreStoreReadError` is set, deletion proceeds via optimistic transaction without decoding the object data
+
+2. **Watch Layer** ([`etcd3/watcher.go`](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/storage/etcd3/watcher.go)): DELETE events for corrupt objects fail transformation. The error is wrapped as `corruptObjectDeletedError` and converted to a `watch.Error` event with `StatusReasonStoreReadError`
+
+3. **Client-side Recovery** ([`client-go/tools/cache/reflector.go`](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/client-go/tools/cache/reflector.go)):
+   - Reflector receives `watch.Error` with known reason `StatusReasonStoreReadError`
+   - Returns nil (not treated as retryable internal error)
+   - Triggers LIST operation on next loop iteration
+   - Fresh LIST replaces cache with current consistent state
+
 ### Test Plan
 
 <!--
